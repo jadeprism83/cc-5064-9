@@ -169,10 +169,13 @@ function intersectRod(ray, o) {
 }
 
 // Geometry pass: attributes + depth only, no material shading.
-export function intersectScene(ray) {
+// `extra` appends per-frame dynamic objects (sliding occluders, moving props)
+// without mutating the static scene table.
+export function intersectScene(ray, extra = null) {
   let bestT = Infinity;
   let best = null;
-  for (const o of OBJECTS) {
+  const all = extra && extra.length ? [...extra, ...OBJECTS] : OBJECTS;
+  for (const o of all) {
     let t = -1;
     if (o.kind === 'plane') t = intersectPlane(ray, o.normal, o.point);
     else if (o.kind === 'quad') {
@@ -227,7 +230,8 @@ export function attributesAtPoint(o, px, py, pz, dx, dy, dz) {
 
 // Full hit record (uv, normal), computed lazily only when a sample is shaded.
 export function hitAttributes(hit, ray) {
-  return attributesAtPoint(hit.object, hit.point.x, hit.point.y, hit.point.z, ray.d.x, ray.d.y, ray.d.z);
+  const a = attributesAtPoint(hit.object, hit.point.x, hit.point.y, hit.point.z, ray.d.x, ray.d.y, ray.d.z);
+  return { uv: { u: a.u, v: a.v }, normal: a.normal, cosView: a.cosView };
 }
 
 const GAZE_SHARED = { x: 0.5, y: 0.5 };
@@ -243,9 +247,9 @@ export function makeCameraAiming(eye, point, sx, sy, W = WIDTH, H = HEIGHT) {
     const right = norm(cross(f, v3(0, 1, 0)));
     const upv = cross(right, f);
     const off = add(scale(right, nx * tanHalf * ASPECT), scale(upv, ny * tanHalf));
-    const c = dot(off, d);
+    const cOff = dot(off, d);
     const o2 = dot(off, off);
-    f = norm(sub(scale(d, c + Math.sqrt(Math.max(0, c * c + 1 - o2)), off)));
+    f = norm(sub(scale(d, cOff + Math.sqrt(Math.max(0, cOff * cOff + 1 - o2))), off));
   }
   const right = norm(cross(f, v3(0, 1, 0)));
   return { eye, f, right, upv: cross(right, f), tanHalf, aspect: ASPECT };

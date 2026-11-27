@@ -1,10 +1,15 @@
 {
-  "name": "workspace",
+  "name": "vrs-dynamic-quality-map",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Dynamic quality-map variable rate shading with foveation, disocclusion reservation and an editable region budget controller",
+  "type": "module",
+  "main": "src/app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "serve": "node tools/serve.mjs",
+    "test:acceptance": "node tools/run-acceptance.mjs",
+    "test:ui": "node tools/test-ui.mjs",
+    "test": "node tools/run-acceptance.mjs && node tools/test-ui.mjs",
+    "samples": "node tools/gen-samples.mjs"
   },
   "repository": {
     "type": "git",

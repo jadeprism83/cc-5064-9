@@ -77,6 +77,28 @@ export function sampleTexture(material, u, v) {
     }
     case 'pupil':
       return [0.02, 0.02, 0.03];
+    case 'fence': {
+      // Thin painted rods: fine scratches make lost rods easy to see against
+      // the poster when the panel slides away.
+      const scratch = 0.5 + 0.5 * Math.sin(u * 1400);
+      const band = Math.exp(-Math.pow((v - 0.5) * 7, 2));
+      const g = 0.16 + band * 0.45 + scratch * 0.08;
+      return [g * 1.05, g * 0.95, g * 0.8];
+    }
+    case 'panel': {
+      // Muted matte panel with a fine checker; strong texture so any coarse
+      // shading on the panel itself is visible.
+      const chk = ((Math.floor(u * 96) + Math.floor(v * 96)) & 1) ? 0.92 : 0.78;
+      const grain = valueNoise(u * 260, v * 260, 41) * 0.06;
+      const g = chk * 0.62 + grain;
+      return [g * 1.02, g, g * 0.94];
+    }
+    case 'target': {
+      // High-frequency rings: a demanding target for borrowed neighbour budget.
+      const ring = 0.5 + 0.5 * Math.sin(Math.hypot(u - 0.5, v - 0.5) * 360);
+      const g = 0.25 + ring * 0.65;
+      return [g, 0.3 + ring * 0.3, 0.25 + ring * 0.2];
+    }
     default:
       return [0.6, 0.6, 0.6];
   }

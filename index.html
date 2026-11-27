@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>可变着色率 · 光栅调试视窗</title>
+<style>
+  :root {
+    --bg: #14171c;
+    --panel: #1d222a;
+    --line: #2c333d;
+    --text: #d8dde6;
+    --muted: #8a93a0;
+    --accent: #5aaaff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.5 system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  header { padding: 12px 18px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0 0 4px; font-size: 16px; }
+  header p { margin: 0; color: var(--muted); font-size: 12px; }
+  .layout { display: grid; grid-template-columns: minmax(640px, 1fr) 320px; gap: 16px; padding: 16px 18px; }
+  .canvas-wrap { display: flex; flex-direction: column; gap: 12px; }
+  .canvas-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  figure { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+  figure figcaption { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  canvas { display: block; image-rendering: pixelated; background: #000; border-radius: 4px; }
+  #mainCanvas, #rateCanvas { width: 640px; height: 360px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+  .panel h2 { font-size: 13px; margin: 0 0 10px; color: var(--accent); }
+  .panel + .panel { margin-top: 14px; }
+  label { display: block; margin: 8px 0 2px; color: var(--muted); }
+  select, button, input[type="range"] { width: 100%; }
+  select, button {
+    background: #232932; color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px 9px; font-size: 13px;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  .btn-row { display: flex; gap: 8px; }
+  .btn-row button { flex: 1; }
+  .budget-row { display: grid; grid-template-columns: 1fr 56px; gap: 8px; align-items: center; }
+  .budget-row output { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+  .stat { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dashed var(--line); }
+  .stat:last-child { border-bottom: 0; }
+  .stat b { font-variant-numeric: tabular-nums; }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
+  .swatch { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
+  #tooltip {
+    position: fixed; pointer-events: none; display: none; z-index: 10;
+    background: #0d1014; border: 1px solid var(--accent); border-radius: 6px;
+    padding: 8px 10px; white-space: pre-wrap; font-size: 12px; max-width: 300px;
+  }
+  .warn { color: #ff8a8a; }
+  .ok { color: #7fd99a; }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .checkbox-row input { width: auto; }
+  .reason-box {
+    background: #11151a; border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px; font-size: 12px; white-space: pre-wrap; min-height: 60px; color: var(--text);
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>可变着色率（VRS）· 光栅调试视窗</h1>
+  <p>动态质量图结合注视移动、画面边缘与近期重建误差调整采样密度；所有质量决策仅使用声明可得的运行时信号，离线全质量参考单独计成本。</p>
+</header>
+
+<div class="layout">
+  <div class="canvas-wrap">
+    <div class="canvas-row">
+      <figure>
+        <figcaption>真实重建画面（自适应采样 + 时间重投影）</figcaption>
+        <canvas id="mainCanvas" width="640" height="360"></canvas>
+      </figure>
+    </div>
+    <div class="canvas-row">
+      <figure>
+        <figcaption>着色率分布（绿=1x，黄=1/4 着色，红=1/16 着色；蓝框=借用预算，紫框=预算受限显露）</figcaption>
+        <canvas id="rateCanvas" width="640" height="360"></canvas>
+      </figure>
+    </div>
+    <div class="legend">
+      <span class="chip"><span class="swatch" style="background:rgb(64,220,128)"></span>全速率</span>
+      <span class="chip"><span class="swatch" style="background:rgb(245,190,70)"></span>半速率</span>
+      <span class="chip"><span class="swatch" style="background:rgb(235,90,90)"></span>1/4 速率</span>
+      <span class="chip"><span class="swatch" style="background:rgb(90,170,255)"></span>跨区借用</span>
+      <span class="chip"><span class="swatch" style="background:rgb(255,80,255)"></span>预算受限</span>
+    </div>
+  </div>
+
+  <aside>
+    <div class="panel">
+      <h2>场景与模式</h2>
+      <label for="scenario">测试场景</label>
+      <select id="scenario">
+        <option value="occluded">段1：注视扫过，栅栏被遮挡</option>
+        <option value="revealed">段2：同轨迹，遮挡移开</option>
+        <option value="saccade">快速扫视</option>
+        <option value="targetMotion">细纹理高速目标</option>
+        <option value="suddenReveal">静止注视下突然显露</option>
+      </select>
+      <label for="mode">质量图模式</label>
+      <select id="mode">
+        <option value="adaptive">动态质量图（自适应）</option>
+        <option value="fixed">初版固定分区（可切换）</option>
+      </select>
+      <div class="btn-row" style="margin-top:10px">
+        <button id="playBtn">播放</button>
+        <button id="stepBtn">单步</button>
+        <button id="resetBtn">重置</button>
+      </div>
+      <div class="checkbox-row"><input type="checkbox" id="overlayToggle" checked /><label for="overlayToggle" style="margin:0">显示着色率叠加</label></div>
+      <div class="checkbox-row"><input type="checkbox" id="anomToggle" checked /><label for="anomToggle" style="margin:0">标出相关异常</label></div>
+      <div class="checkbox-row"><input type="checkbox" id="borrowToggle" checked /><label for="borrowToggle" style="margin:0">标出借用预算</label></div>
+    </div>
+
+    <div class="panel">
+      <h2>可编辑区域预算控制器</h2>
+      <div class="budget-row">
+        <div>
+          <label for="budTop">顶部周边带预算</label>
+          <input type="range" id="budTop" min="0.02" max="0.6" step="0.01" />
+        </div>
+        <output id="budTopVal"></output>
+      </div>
+      <div class="budget-row">
+        <div>
+          <label for="budFovea">中央注视带预算</label>
+          <input type="range" id="budFovea" min="0.02" max="0.95" step="0.01" />
+        </div>
+        <output id="budFoveaVal"></output>
+      </div>
+      <div class="budget-row">
+        <div>
+          <label for="budBottom">底部周边带预算</label>
+          <input type="range" id="budBottom" min="0.02" max="0.6" step="0.01" />
+        </div>
+        <output id="budBottomVal"></output>
+      </div>
+      <div class="budget-row">
+        <div>
+          <label for="budGlobal">全局着色预算上限（最低为探针+单锚点可行下限）</label>
+          <input type="range" id="budGlobal" min="0.13" max="0.6" step="0.01" />
+        </div>
+        <output id="budGlobalVal"></output>
+      </div>
+      <div class="checkbox-row"><input type="checkbox" id="borrowEnable" checked /><label for="borrowEnable" style="margin:0">允许跨带借用邻区预算</label></div>
+    </div>
+
+    <div class="panel">
+      <h2>运行状态</h2>
+      <div class="stat"><span>帧</span><b id="stFrame">-</b></div>
+      <div class="stat"><span>着色调用占全质量比</span><b id="stFrac">-</b></div>
+      <div class="stat"><span>实际/预算锚点</span><b id="stBudget">-</b></div>
+      <div class="stat"><span>闪烁瓦片数</span><b id="stFlicker">-</b></div>
+      <div class="stat"><span>显露瓦片</span><b id="stReveal">-</b></div>
+      <div class="stat"><span>借用瓦片</span><b id="stBorrow">-</b></div>
+      <div class="stat"><span>时间复用像素</span><b id="stTemporal">-</b></div>
+      <div class="stat"><span>重建异常像素</span><b id="stInvalid">-</b></div>
+      <div class="stat"><span>速率分布 1x/半/1-4</span><b id="stHist">-</b></div>
+    </div>
+
+    <div class="panel">
+      <h2>区域升降质量依据（悬停画面查看瓦片）</h2>
+      <div class="reason-box" id="reasonBox">将鼠标移到画面或着色率图上，查看该瓦片的采样率与决策依据。</div>
+    </div>
+  </aside>
+</div>
+
+<div id="tooltip"></div>
+
+<script type="module" src="./src/ui.js"></script>
+</body>
+</html>
